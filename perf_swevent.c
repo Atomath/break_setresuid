@@ -8,6 +8,10 @@
 #include <errno.h>
 #include <device_database.h>
 
+#ifndef __NR_perf_event_open
+#define __NR_perf_event_open   (__NR_SYSCALL_BASE+364)
+#endif
+
 typedef struct _supported_device {
   device_id_t device_id;
   unsigned long int perf_swevent_enabled_address;
