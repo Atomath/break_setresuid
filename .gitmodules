@@ -10,3 +10,6 @@
 [submodule "device_database"]
 	path = device_database
 	url = https://github.com/android-rooting-tools/android_device_database
+[submodule "plugins"]
+	path = plugins
+	url = https://github.com/hiikezoe/mole_plough_plugins
