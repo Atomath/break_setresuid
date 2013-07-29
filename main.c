@@ -237,7 +237,7 @@ disable_exec_security_check(void *mmap_base_address, void *user_data)
   }
 
   plugin_handler = mole_plough_static_plugin_register();
-  if (plugin_handler) {
+  if (!plugin_handler) {
     return false;
   }
 
