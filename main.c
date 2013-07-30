@@ -101,12 +101,17 @@ static unsigned long int
 get_sys_setresuid_address_in_memory(void *kernel_memory)
 {
   kallsyms *kallsyms;
+  unsigned long int address;
 
   kallsyms = kallsyms_in_memory_init(kernel_memory, 0x1000000);
   if (!kallsyms) {
     return 0;
   }
-  return kallsyms_in_memory_lookup_name(kallsyms, "sys_setresuid");
+
+  address = kallsyms_in_memory_lookup_name(kallsyms, "sys_setresuid");
+  kallsyms_in_memory_free(kallsyms);
+
+  return address;
 }
 
 static bool
@@ -243,6 +248,7 @@ disable_exec_security_check(void *mmap_base_address, void *user_data)
 
   plugin_handler = mole_plough_static_plugin_register();
   if (!plugin_handler) {
+    kallsyms_in_memory_free(kallsyms);
     return false;
   }
 
@@ -251,6 +257,7 @@ disable_exec_security_check(void *mmap_base_address, void *user_data)
   ret = mole_plough_plugin_disable_exec_security_check(plugin_handler,
                                                        fb_mem_convert_to_mmaped_address,
                                                        mmap_base_address);
+  kallsyms_in_memory_free(kallsyms);
   return (ret == 0);
 }
 
