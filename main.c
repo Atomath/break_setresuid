@@ -109,7 +109,6 @@ get_sys_setresuid_address_in_memory(void *kernel_memory)
   }
 
   address = kallsyms_in_memory_lookup_name(kallsyms, "sys_setresuid");
-  kallsyms_in_memory_free(kallsyms);
 
   return address;
 }
