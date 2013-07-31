@@ -192,7 +192,7 @@ fb_mem_exploit_callback(void *mmap_base_address, void *user_data)
   kallsyms *kallsyms;
 
   plugin_handler = mole_plough_static_plugin_register();
-  if (plugin_handler) {
+  if (!plugin_handler) {
     return false;
   }
 
